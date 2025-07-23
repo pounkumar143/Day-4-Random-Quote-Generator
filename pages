@@ -1,0 +1,152 @@
+1_Dashboard : 
+           import streamlit as st
+
+# Step 1: Set the header of the page
+st.header("Dashboard")
+
+# Step 2: Display a welcome message and feature list using markdown
+st.markdown("""
+Welcome to your AI Quote Generator Dashboard.  
+- Generate inspiring quotes in multiple languages.  
+- Get rich stories and examples crafted by AI.  
+- Download your portfolio as a PDF.
+""")
+
+2_Quote_Creator :  
+               import streamlit as st
+from modules import ai, quotes, languages, user_tracking
+import io
+from docx import Document
+from docx.shared import Pt
+
+# Quote types
+QUOTE_TYPES = [
+    ("Motivational Quotes", "Inspire action, courage, and perseverance."),
+    ("Inspirational Quotes", "Uplift the spirit and encourage positivity."),
+    ("Wisdom / Philosophical Quotes", "Offer deep insights into life, existence, and human nature."),
+    ("Love / Romantic Quotes", "Express affection, passion, and emotional connection."),
+    ("Friendship Quotes", "Celebrate bonds, loyalty, and companionship."),
+    ("Success / Achievement Quotes", "Focus on goals, ambition, and accomplishments."),
+    ("Growth / Change Quotes", "Emphasize personal development and transformation."),
+    ("Spiritual / Religious Quotes", "Drawn from sacred texts or spiritual leaders."),
+    ("Life Quotes", "Reflect on the journey, meaning, and beauty of life."),
+    ("Happiness Quotes", "Centered around joy, contentment, and peace."),
+    ("Sadness / Healing Quotes", "Help cope with grief, loss, or emotional pain."),
+    ("Leadership Quotes", "Inspire vision, responsibility, and influence."),
+    ("Courage / Strength Quotes", "Encourage bravery and resilience."),
+    ("Time / Patience Quotes", "Reflect on the value of time and waiting."),
+    ("Creativity / Art Quotes", "Celebrate imagination, originality, and artistic expression."),
+    ("Humor / Funny Quotes", "Light-hearted, witty, or sarcastic expressions."),
+    ("Education / Learning Quotes", "Promote knowledge, curiosity, and growth."),
+    ("Technology / AI Quotes", "Explore innovation, digital life, and the future."),
+    ("Cultural / Traditional Quotes", "Rooted in regional wisdom and customs."),
+    ("Thirukkural Quotes (Tamil)", "Ancient Tamil couplets on ethics, love, and governance."),
+    ("Tamil Literature Quotes", "From Sangam poetry, Bharathiyar, and modern Tamil thinkers."),
+    ("Proverbs / Sayings", "Short, traditional expressions of wisdom from various cultures."),
+    ("Historical / Political Quotes", "From leaders, revolutionaries, and changemakers."),
+    ("Business / Entrepreneurial Quotes", "Focused on innovation, risk-taking, and leadership."),
+    ("Environmental / Nature Quotes", "Celebrate the earth, sustainability, and natural beauty."),
+]
+
+st.header("✍️ Quote Creator")
+
+# Language dropdown
+lang_display, lang_codes = languages.all_languages()
+selected_lang = st.selectbox("Select Output Language", lang_display)
+lang_code = lang_codes[lang_display.index(selected_lang)]
+lang_name = selected_lang
+
+# Quote type dropdown
+quote_type = st.selectbox(
+    "Select Quote Type",
+    [qt[0] for qt in QUOTE_TYPES],
+    format_func=lambda x: next(desc for t, desc in QUOTE_TYPES if t == x)
+)
+
+topic = st.text_input("Optionally enter a topic or keywords")
+
+user_id = f"{st.session_state.user_name.lower().replace(' ', '_')}_{st.session_state.user_email.split('@')[0]}"
+
+# Initialize session state variables if not exist
+if "last_quote" not in st.session_state:
+    st.session_state.last_quote = ""
+if "last_story" not in st.session_state:
+    st.session_state.last_story = ""
+
+# Checkbox to generate AI character names or not
+generate_characters = st.checkbox("Generate AI character names in story", value=True)
+
+
+def build_story_prompt_dynamic(quote, language, include_characters):
+    prompt = f"""
+Write an inspiring story in markdown format based on the following quote. Use ONLY {language}.
+
+# {quote}
+
+## 📜 Prologue
+Describe the setting and context briefly.
+
+"""
+    if include_characters:
+        prompt += """
+## 🧑‍🔧 Main Characters
+Generate 3-5 original character names and a one-sentence description each relevant to the story.
+"""
+    else:
+        prompt += """
+## 🧑‍🔧 Main Characters
+(You may omit characters or use placeholders.)
+"""
+    prompt += """
+## Story
+Write a multi-paragraph story featuring the characters (if any) and illustrating the quote's meaning.
+"""
+    return prompt
+
+
+if st.button("Generate Quote and Story"):
+    with st.spinner("Generating quote and story..."):
+        quote_prompt = ai.build_quote_prompt(quote_type, topic, lang_name)
+        generated_quote = ai.generate_quote_groq(quote_prompt).strip()
+        st.session_state.last_quote = generated_quote
+
+        story_prompt = build_story_prompt_dynamic(generated_quote, lang_name, generate_characters)
+        generated_story = ai.generate_quote_groq(story_prompt).strip()
+        st.session_state.last_story = generated_story
+
+        quotes.save_user_quote(user_id, generated_quote, quote_type, lang_code, generated_story)
+
+        user_tracking.log_user_activity(
+            name=st.session_state.user_name,
+            email=st.session_state.user_email,
+            language=lang_name,
+            quote_type=quote_type,
+            topic=topic,
+            quote_text=generated_quote,
+            story_text=generated_story
+        )
+
+        st.success("Quote and story saved!")
+
+# Display last generated quote once only
+if st.session_state.last_quote:
+    st.markdown(f"## 📝 Generated Quote\n\n> **{st.session_state.last_quote}**")
+
+# Display last generated story once only
+if st.session_state.last_story:
+    st.markdown("---")
+    st.markdown(st.session_state.last_story)
+
+# Export current quote/story as DOCX and TXT
+def export_current_docx(quote, story, username):
+    doc = Document()
+    doc.add_heading(f"{username}'s Current AI-Generated Quote & Story", 0)
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Noto Sans'
+    font.size = Pt(12)
+    doc.add_heading("Quote:", level=2)
+    doc.add_paragraph(quote, style='Quote')
+    doc.add_heading("Story:", level=2)
+    doc.add_paragraph(story)
+    buf = io.BytesIO()
