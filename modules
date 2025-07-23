@@ -1,0 +1,247 @@
+ai.py :
+       import os
+from dotenv import load_dotenv
+import requests
+
+load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama-3.3-70b-versatile"
+
+def generate_quote_groq(prompt):
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    payload = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    resp = requests.post(GROQ_BASE_URL, json=payload, headers=headers, timeout=60)
+    resp.raise_for_status()
+    return resp.json()['choices'][0]['message']['content'].strip()
+
+def build_quote_prompt(quote_type, topic, lang_name):
+    prompt = f"Write a {quote_type} quote"
+    if topic:
+        prompt += f" about '{topic}'"
+    prompt += (
+        f". Respond ONLY in {lang_name}. Do NOT use English, translation, or explanation. "
+        "Output only the quote."
+    )
+    return prompt
+
+def build_story_prompt(quote, lang_name):
+    return f"""
+Write a story in markdown format based on this quote. Write ONLY in {lang_name}.
+No English or any other language allowed.
+
+# {quote}
+
+## 📜 Prologue
+Set the scene vividly in 2-4 sentences.
+
+## 🧑‍🔧 Main Characters
+- Kael Virek — A quiet inventor with a haunted past.
+- Lira Solen — A fierce rebel leader.
+- Eloen — A mysterious child with a secret.
+- Captain Thorne — The ruthless enforcer.
+- The Ember Circle — A hidden community of fighters and dreamers.
+
+## Story
+Write a multi-paragraph narrative featuring the above characters illustrating the quote.
+"""
+
+languages.py :
+        def all_languages():
+    names = [
+        "English",
+        "中文 (Mandarin Chinese)",
+        "हिन्दी (Hindi)",
+        "Español (Spanish)",
+        "Français (French)",
+        "العربية (Modern Standard Arabic)",
+        "বাংলা (Bengali)",
+        "Português (Portuguese)",
+        "Русский (Russian)",
+        "اردو (Urdu)",
+        "Bahasa Indonesia (Indonesian)",
+        "Deutsch (German)",
+        "日本語 (Japanese)",
+        "Kiswahili (Swahili)",
+        "मराठी (Marathi)",
+        "తెలుగు (Telugu)",
+        "Türkçe (Turkish)",
+        "தமிழ் (Tamil)",
+        "Tiếng Việt (Vietnamese)",
+        "한국어 (Korean)",
+        "吴语 (Wu Chinese, Shanghainese)",
+        "Basa Jawa (Javanese)",
+        "پنجابی (Western Punjabi)",
+        "粤语 (Yue Chinese, Cantonese)",
+        "Italiano (Italian)",
+        "ไทย (Thai)",
+        "ગુજરાતી (Gujarati)",
+        "ಕನ್ನಡ (Kannada)",
+        "فارسی (Persian/Farsi)",
+        "Polski (Polish)",
+        "Українська (Ukrainian)",
+        "മലയാളം (Malayalam)",
+        "ଓଡ଼ିଆ (Odia/Oriya)",
+        "မြန်မာဘာသာ (Burmese)",
+        "Hausa",
+        "भोजपुरी (Bhojpuri)",
+        "Filipino (Tagalog)",
+        "Yorùbá (Yoruba)",
+        "سنڌي (Sindhi)",
+        "አማርኛ (Amharic)",
+        "Igbo",
+        "Nederlands (Dutch)",
+        "سرائیکی (Saraiki)",
+        "नेपाली (Nepali)",
+        "සිංහල (Sinhala)",
+        "ភាសាខ្មែរ (Khmer)",
+        "Cebuano",
+        "Malagasy",
+        "छत्तीसगढ़ी (Chhattisgarhi)",
+        "Soomaali (Somali)"
+    ]
+    codes = [
+        "en", "zh", "hi", "es", "fr", "ar", "bn", "pt", "ru", "ur", "id", "de",
+        "ja", "sw", "mr", "te", "tr", "ta", "vi", "ko", "wuu", "jv", "pnb", "yue",
+        "it", "th", "gu", "kn", "fa", "pl", "uk", "ml", "or", "my", "ha", "bho",
+        "tl", "yo", "sd", "am", "ig", "nl", "skr", "ne", "si", "km", "ceb", "mg",
+        "hne", "so"
+    ]
+    return names, codes
+
+def get_language_name(code):
+    names, codes = all_languages()
+    if code in codes:
+        return names[codes.index(code)]
+    return code
+
+quotes.py :
+         import os
+import json
+from datetime import datetime
+from io import BytesIO
+from docx import Document
+from docx.shared import Pt
+
+DATA_PATH = "data/portfolios"
+
+def _portfolio_file(user_id):
+    return os.path.join(DATA_PATH, f"{user_id}.json")
+
+def load_user_quotes(user_id):
+    path = _portfolio_file(user_id)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("quotes", [])
+    return []
+
+def save_user_quote(user_id, text, quote_type, lang_code, story=None):
+    os.makedirs(DATA_PATH, exist_ok=True)
+    path = _portfolio_file(user_id)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            portfolio = json.load(f)
+        quotes_list = portfolio.get("quotes", [])
+    else:
+        quotes_list = []
+
+    new_entry = {
+        "id": len(quotes_list) + 1,
+        "text": text,
+        "type": quote_type,
+        "lang": lang_code,
+        "story": story or "",
+        "timestamp": datetime.now().isoformat()
+    }
+    quotes_list.append(new_entry)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"quotes": quotes_list}, f, ensure_ascii=False, indent=2)
+
+def export_txt(user_id, lang_code):
+    quotes = load_user_quotes(user_id)
+    filtered = [q for q in quotes if q.get("lang") == lang_code]
+    if not filtered:
+        raise RuntimeError("No quotes to export in the selected language.")
+    lines = []
+    for q in filtered:
+        lines.append(f"[{q['type']}] ({q['lang']})")
+        lines.append(q["text"])
+        if q.get("story"):
+            lines.append("Story / Example:")
+            lines.append(q["story"])
+        lines.append(f"-- {q['timestamp']}")
+        lines.append("")
+    return "\n".join(lines)
+
+def export_docx(user_id, username, lang_code):
+    quotes = load_user_quotes(user_id)
+    filtered = [q for q in quotes if q.get("lang") == lang_code]
+    if not filtered:
+        raise RuntimeError("No quotes to export in the selected language.")
+    doc = Document()
+    doc.add_heading(f"{username}'s AI-Generated Quote Portfolio ({lang_code})", 0)
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Noto Sans'
+    font.size = Pt(12)
+    for q in filtered:
+        doc.add_heading(f"[{q['type']}] ({q['lang']})", level=2)
+        doc.add_paragraph(q['text'], style='Quote')
+        if q.get("story"):
+            doc.add_paragraph("Story / Example:", style='Intense Quote')
+            doc.add_paragraph(q['story'])
+        doc.add_paragraph(f"-- {q['timestamp']}")
+        doc.add_paragraph("")
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+user_tracking.py:
+                import os
+from datetime import datetime
+from openpyxl import Workbook, load_workbook
+
+DATA_PATH = "data"
+EXCEL_FILE = os.path.join(DATA_PATH, "users_data.xlsx")
+
+def log_user_activity(name, email, language, quote_type, topic, quote_text, story_text):
+    # 1. Ensure directory exists
+    os.makedirs(DATA_PATH, exist_ok=True)
+    
+    # 2. If file doesn't exist (or is empty), create with headers
+    if not os.path.exists(EXCEL_FILE) or os.stat(EXCEL_FILE).st_size == 0:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "UserActivity"
+        ws.append([
+            "Name",
+            "Email",
+            "Timestamp",
+            "Selected Language",
+            "Selected Quote Type",
+            "Topic",
+            "Generated Quote",
+            "Generated Story"
+        ])
+        wb.save(EXCEL_FILE)
+
+    # 3. Actually open and write user row
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb.active  # use active - matches creation
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws.append([
+        name,
+        email,
+        timestamp,
+        language,
+        quote_type,
+        topic,
+        quote_text,
+        story_text
+    ])
+    wb.save(EXCEL_FILE)
